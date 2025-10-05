@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DeveloperToolsToolWindowSettingsV1" lastSelectedContentNodeId="password-generator">
+    <developerToolsConfigurations>
+      <developerToolConfiguration developerToolId="password-generator" id="b22b58f6-590c-4057-b8a1-a295ff91e117" name="Workbench">
+        <properties>
+          <property key="length" type="CONFIGURATION" value="kotlin.Int|99" />
+        </properties>
+      </developerToolConfiguration>
+    </developerToolsConfigurations>
+  </component>
+</project>
