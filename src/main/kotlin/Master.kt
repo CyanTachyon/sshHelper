@@ -61,6 +61,9 @@ class Master(
                             id = it.id
                             println("注册主机成功，主机ID：${it.id}，请在客户端使用该ID连接")
                         }
+                        is RelayRequest  -> Unit
+                        is RelayConnect  -> Unit
+                        RelayReady       -> Unit
                     }
                 }
             }.onFailure(Throwable::printStackTrace)
@@ -84,8 +87,33 @@ class Master(
             }
             if (success) return@repeat
         }
-        require(success) { "无法连接到主机 (${client.host}:${client.port})" }
-        ClientManager(clientSocket).start()
+
+        val dataSocket: Socket
+        if (success)
+        {
+            println("P2P连接成功 (${client.host}:${client.port})")
+            dataSocket = clientSocket
+        }
+        else
+        {
+            println("P2P连接失败，尝试服务器转发...")
+            runCatching { clientSocket.close() }
+            dataSocket = connectRelay()
+        }
+
+        ClientManager(dataSocket).start()
+    }
+
+    private fun connectRelay(): Socket
+    {
+        val relaySocket = Socket()
+        relaySocket.connect(InetSocketAddress(serverHost, serverPort))
+        relaySocket.outputStream.writePackage(RelayConnect(id!!))
+        println("等待服务器建立转发通道...")
+        val response = relaySocket.inputStream.readRawPackage()
+        require(response is RelayReady) { "服务器转发握手失败: $response" }
+        println("服务器转发通道已建立")
+        return relaySocket
     }
 
     private inner class ClientManager(val socket: Socket)

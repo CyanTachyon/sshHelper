@@ -1,6 +1,8 @@
 package moe.tachyon
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.ExperimentalSerializationApi
 import java.net.ServerSocket
 import java.net.Socket
@@ -10,6 +12,9 @@ import kotlin.uuid.Uuid
 class Server
 {
     val masters = mutableMapOf<String, Socket>()
+    val relayGuests = mutableMapOf<String, Socket>()
+    val relayMasters = mutableMapOf<String, Socket>()
+    val relayMutex = Mutex()
 
     val coroutineScope = CoroutineScope(Dispatchers.IO + CoroutineExceptionHandler()
     { _, throwable ->
@@ -75,9 +80,72 @@ class Server
                     }
                     is Client   -> println("错误：客户端不应发送 Client 包，来自 ${socket.inetAddress.hostAddress}:${socket.port}")
                     Ping -> Unit
+                    is RelayRequest ->
+                    {
+                        println("收到转发请求，客户端请求转发到主机 ${p.id}")
+                        relayMutex.withLock()
+                        {
+                            relayGuests[p.id] = socket
+                            tryBridge(p.id)
+                        }
+                        return@launch
+                    }
+                    is RelayConnect ->
+                    {
+                        println("收到转发连接，主机 ${p.id} 准备接受转发")
+                        relayMutex.withLock()
+                        {
+                            relayMasters[p.id] = socket
+                            tryBridge(p.id)
+                        }
+                        return@launch
+                    }
+                    RelayReady -> Unit
                 }
             }
         }
         master?.let { masters.remove(it) }
+    }
+
+    private fun tryBridge(id: String)
+    {
+        val guestSocket = relayGuests[id] ?: return
+        val masterSocket = relayMasters[id] ?: return
+        relayGuests.remove(id)
+        relayMasters.remove(id)
+        println("建立转发通道: 主机 $id")
+        guestSocket.outputStream.writePackage(RelayReady)
+        masterSocket.outputStream.writePackage(RelayReady)
+        bridgeSockets(guestSocket, masterSocket, id)
+    }
+
+    private fun bridgeSockets(a: Socket, b: Socket, id: String)
+    {
+        fun forward(from: Socket, to: Socket) = coroutineScope.launch()
+        {
+            runCatching()
+            {
+                val buffer = ByteArray(8192)
+                val input = from.getInputStream()
+                val output = to.getOutputStream()
+                while (true)
+                {
+                    val read = input.read(buffer)
+                    if (read == -1) break
+                    output.write(buffer, 0, read)
+                    output.flush()
+                }
+            }
+            runCatching { from.close() }
+            runCatching { to.close() }
+        }
+        val job1 = forward(a, b)
+        val job2 = forward(b, a)
+        coroutineScope.launch()
+        {
+            job1.join()
+            job2.join()
+            println("转发通道已关闭: 主机 $id")
+        }
     }
 }

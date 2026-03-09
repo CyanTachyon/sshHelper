@@ -19,7 +19,7 @@ import kotlin.system.exitProcess
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-class Guest(masterId: String, val port: Int)
+class Guest(val masterId: String, val port: Int)
 {
     val socket = Socket()
     val output: OutputStream
@@ -63,15 +63,27 @@ class Guest(masterId: String, val port: Int)
             }
             if (success) return@repeat
         }
-        require(success) { "无法连接到客户端 (${client.host}:${client.port})" }
-        println("连接到客户端 (${client.host}:${client.port})")
+
+        val dataSocket: Socket
+        if (success)
+        {
+            println("P2P连接成功 (${client.host}:${client.port})")
+            dataSocket = clientSocket
+        }
+        else
+        {
+            println("P2P连接失败，尝试服务器转发...")
+            runCatching { clientSocket.close() }
+            dataSocket = connectRelay()
+        }
+
         val serverSocket = ServerSocket(port)
         println("请使用ssh连接 localhost:$port")
 
-        val clientInput = DataInputStream(clientSocket.getInputStream())
-        val clientOutput = DataOutputStream(clientSocket.getOutputStream())
+        val clientInput = DataInputStream(dataSocket.getInputStream())
+        val clientOutput = DataOutputStream(dataSocket.getOutputStream())
 
-        listenClient(clientSocket, clientInput, clientOutput)
+        listenClient(dataSocket, clientInput, clientOutput)
 
         while (true)
         {
@@ -81,6 +93,18 @@ class Guest(masterId: String, val port: Int)
             println("收到SSH连接请求，来自 ${sshSocket.inetAddress.hostAddress}:${sshSocket.port}")
             launchForwarder(sshInput, sshOutput, clientOutput)
         }
+    }
+
+    private fun connectRelay(): Socket
+    {
+        val relaySocket = Socket()
+        relaySocket.connect(InetSocketAddress(serverHost, serverPort))
+        relaySocket.outputStream.writePackage(RelayRequest(masterId))
+        println("等待服务器建立转发通道...")
+        val response = relaySocket.inputStream.readRawPackage()
+        require(response is RelayReady) { "服务器转发握手失败: $response" }
+        println("服务器转发通道已建立")
+        return relaySocket
     }
 
     val sshMap = mutableMapOf<String, Pair<InputStream, OutputStream>>()

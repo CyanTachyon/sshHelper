@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.ClassDiscriminatorMode
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.OutputStream
 
 val serverHost = "server.tachyon.moe"
@@ -28,6 +29,18 @@ data class ConnectToHost(val id: String): Package
 @Serializable
 @SerialName("client")
 data class Client(val host: String, val port: Int): Package
+
+@Serializable
+@SerialName("relay_request")
+data class RelayRequest(val id: String): Package
+
+@Serializable
+@SerialName("relay_connect")
+data class RelayConnect(val id: String): Package
+
+@Serializable
+@SerialName("relay_ready")
+data object RelayReady: Package
 
 @OptIn(ExperimentalSerializationApi::class)
 val json = Json()
@@ -60,4 +73,24 @@ fun OutputStream.writePackage(p: Package)
     this.write(json.encodeToString(p).toByteArray())
     this.write("\n".toByteArray())
     this.flush()
+}
+
+fun InputStream.readRawLine(): String
+{
+    val sb = StringBuilder()
+    while (true)
+    {
+        val b = this.read()
+        if (b == -1 || b == '\n'.code) break
+        if (b == '\r'.code) continue
+        sb.append(b.toChar())
+    }
+    return sb.toString()
+}
+
+fun InputStream.readRawPackage(): Package?
+{
+    val line = this.readRawLine()
+    if (line.isBlank()) return null
+    return json.decodeFromString<Package>(line)
 }
